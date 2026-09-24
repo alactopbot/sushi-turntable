@@ -22,8 +22,8 @@ async function load(page: Page, state: State) {
 test('opening copy, stable board, invalid and valid swaps, retry without navigation', async ({ page }) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto('/');
-  await expect(page).toHaveTitle('转转寿司');
-  await expect(page.locator('h1')).toHaveText('转转寿司');
+  await expect(page).toHaveTitle('寿司拼盘');
+  await expect(page.locator('h1')).toHaveText('寿司拼盘');
   await expect(page.locator('.tagline')).toHaveText('交换旁边的寿司，连成三个就消掉。掉下来的还能再连哦。');
   await expect(page.locator('.cell')).toHaveCount(64);
   const initial = await snapshot(page);

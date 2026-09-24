@@ -1,6 +1,6 @@
-# 一页纸玩法 · 转转寿司（经典消消乐 v3）
+# 一页纸玩法 · 寿司拼盘（经典消消乐 v3）
 
-公开短名：**转转寿司**（用户拍板）· 仓名可仍为 `alactopbot/sushi-turntable`  
+公开短名：**寿司拼盘**（用户拍板）· 仓名可仍为 `alactopbot/sushi-turntable`  
 版本：v3 · 依据 `PRODUCT.md` / `SPRINT.md` / `SCOPE-FREEZE.md`
 
 ## 明确废弃（禁做主路径）
