@@ -1,70 +1,103 @@
-import { test, expect, type Page } from "@playwright/test";
-import { type State } from "../src/game";
-type Snapshot = State & { busy: boolean; positions: { id: number; x: number; y: number }[] };
-async function snapshot(page: Page): Promise<Snapshot> { return page.evaluate(() => (window as any).__sushi); }
-async function tap(page: Page, x: number, y: number) {
-  const box = (await page.locator("canvas").boundingBox())!;
-  const px = box.x + x * box.width / 520, py = box.y + y * box.height / 570;
-  if (test.info().project.name === "mobile") await page.touchscreen.tap(px,py);
-  else await page.mouse.click(px,py);
+import { test, expect, type Page } from '@playwright/test';
+import { LEVELS, TYPES, matches, swap, type State } from '../src/game';
+type Snapshot = State & { busy: boolean };
+const snapshot = (page: Page): Promise<Snapshot> => page.evaluate(() => (window as any).__sushi);
+async function tap(page: Page, selector: string) {
+  const locator = page.locator(selector);
+  if (test.info().project.name === 'mobile') await locator.tap(); else await locator.click();
 }
-async function pick(page: Page, choose: (s: Snapshot) => number | undefined) {
-  for (let attempts=0;attempts<200;attempts++) {
-    const state = await snapshot(page);
-    const id = !state.busy ? choose(state) : undefined;
-    const p = state.positions.find(p=>p.id===id);
-    if (p) { await tap(page,p.x,p.y); return; }
-    await page.clock.runFor(300);
-  }
-  throw new Error("No selectable sushi within one simulated minute");
+async function exchange(page: Page, a: number, b: number) {
+  await tap(page, `[data-index="${a}"]`); await tap(page, `[data-index="${b}"]`);
+  await expect.poll(async () => (await snapshot(page)).busy).toBe(false);
 }
-test("desktop/touch: full five-level wins, tail-only input, recycle, loss and in-page retries", async ({page}) => {
-  test.setTimeout(300_000);
-  const errors: string[]=[]; page.on("pageerror",e=>errors.push(e.message));
-  await page.clock.install(); await page.goto("/"); await page.clock.runFor(100);
-  await page.evaluate(()=>{ (window as any).__documentToken="same-document"; });
-  await expect(page).toHaveTitle("转转寿司");
-  await expect(page.locator("h1")).toHaveText("转转寿司");
-  await expect(page.locator("header p")).toHaveText("从流水线点到盘子里，连成三个就消掉。盘子不能换顺序哦。");
-  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
-  await page.clock.runFor(2700);
-  const opening=await snapshot(page); expect(opening.belt.length).toBeGreaterThanOrEqual(3);
-  const middle=opening.belt[1]; const p=opening.positions.find(p=>p.id===middle.id)!;
-  await tap(page,p.x,p.y);
-  expect((await snapshot(page)).plate).toEqual([middle.kind]);
-  expect((await snapshot(page)).belt.map(p=>p.id)).not.toContain(middle.id);
-  await tap(page,40,510); await tap(page,480,510);
-  expect((await snapshot(page)).plate).toEqual([middle.kind]);
-  await page.screenshot({path:`test-results/${test.info().project.name}-opening.png`});
-  await page.getByRole("button",{name:"重开本关"}).click();
-  for(let level=1;level<=5;level++) {
-    expect((await snapshot(page)).level.id).toBe(level);
-    for(let i=0;i<40 && (await snapshot(page)).status==="playing";i++) {
-      await pick(page,s=> {
-        const kind = s.plate.at(-1) ?? [...s.belt].sort((a,b) =>
-          s.belt.filter(p=>p.kind===b.kind).length - s.belt.filter(p=>p.kind===a.kind).length)[0]?.kind;
-        return s.belt.find(p=>p.kind===kind)?.id;
-      });
-      await page.clock.runFor(300);
-    }
-    await expect(page.locator("#result-title")).toHaveText("美味大成功！");
-    expect((await snapshot(page)).score).toBeGreaterThanOrEqual((await snapshot(page)).level.target);
-    console.info(`${test.info().project.name}: level ${level} passed`);
-    if(level===5) await page.screenshot({path:`test-results/${test.info().project.name}-win.png`});
-    await page.locator("#next").click();
-    expect((await snapshot(page)).score).toBe(0); expect((await snapshot(page)).plate).toEqual([]);
+function fixture(levelIndex = 0, losing = false): State {
+  const level = LEVELS[levelIndex];
+  const board = Array.from({ length: 64 }, (_, i) => TYPES[(Math.floor(i / 8) + i % 8) % level.types]);
+  board[0] = board[1] = board[10] = 'salmon'; board[2] = 'tuna';
+  return { level, board, score: losing ? 0 : level.target - 60, moves: losing ? 1 : level.moves, status: 'playing' };
+}
+async function load(page: Page, state: State) {
+  await page.evaluate(value => (window as any).__loadSushi(value), state);
+}
+test('opening copy, stable board, invalid and valid swaps, retry without navigation', async ({ page }) => {
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('/');
+  await expect(page).toHaveTitle('转转寿司');
+  await expect(page.locator('h1')).toHaveText('转转寿司');
+  await expect(page.locator('.tagline')).toHaveText('交换旁边的寿司，连成三个就消掉。掉下来的还能再连哦。');
+  await expect(page.locator('.cell')).toHaveCount(64);
+  const initial = await snapshot(page);
+  expect(matches(initial.board)).toEqual([]); expect(initial.moves).toBe(30);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(await page.locator('.cell').first().evaluate(el => el.getBoundingClientRect().width)).toBeGreaterThanOrEqual(40);
+  let valid: [number, number] | undefined, invalid: [number, number] | undefined;
+  for (let i = 0; i < 64; i++) for (const j of [i % 8 < 7 ? i + 1 : -1, i + 8 < 64 ? i + 8 : -1]) {
+    if (j < 0) continue;
+    if (matches(swap(initial.board, i, j)).length) valid = [i, j]; else invalid = [i, j];
   }
-  expect((await snapshot(page)).level.id).toBe(1);
-  await page.clock.runFor(13000);
-  expect((await snapshot(page)).recycled).toBeGreaterThan(0);
-  expect((await snapshot(page)).status).toBe("playing");
-  for(let i=0;i<8;i++) await pick(page,s=>s.belt.find(p=>p.kind!==(s.plate.at(-1)??""))?.id);
-  await expect(page.locator("#result-title")).toHaveText("盘子装满啦");
-  expect((await snapshot(page)).plate).toHaveLength(8);
-  await page.screenshot({path:`test-results/${test.info().project.name}-lose.png`});
-  await page.getByRole("button",{name:"再试一次",exact:true}).click();
-  expect((await snapshot(page)).plate).toEqual([]); expect((await snapshot(page)).score).toBe(0);
-  expect((await snapshot(page)).status).toBe("playing");
-  expect(await page.evaluate(()=>(window as any).__documentToken)).toBe("same-document");
+  expect(invalid).toBeDefined();
+  await exchange(page, ...invalid!);
+  expect((await snapshot(page)).board).toEqual(initial.board); expect((await snapshot(page)).moves).toBe(30);
+  // Stable openings are random; the frozen rules intentionally do not detect dead boards.
+  if (valid) {
+    await exchange(page, ...valid);
+    expect((await snapshot(page)).moves).toBe(29); expect((await snapshot(page)).score).toBeGreaterThanOrEqual(60);
+  }
+  await page.evaluate(() => (window as any).__documentMarker = 'same document');
+  if ((await snapshot(page)).status === 'playing') await tap(page, '#retry'); else await tap(page, '#restart');
+  const fresh = await snapshot(page);
+  expect(fresh.score).toBe(0); expect(fresh.moves).toBe(30); expect(matches(fresh.board)).toEqual([]);
+  expect(await page.evaluate(() => (window as any).__documentMarker)).toBe('same document');
+  await page.screenshot({ path: test.info().outputPath('board.png'), fullPage: true });
   expect(errors).toEqual([]);
+});
+test('real swaps win all five levels, next resets, loss and retry are distinct', async ({ page }) => {
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('/?e2e');
+  await page.evaluate(() => (window as any).__documentMarker = 'same document');
+  for (let level = 0; level < 5; level++) {
+    await load(page, fixture(level));
+    await exchange(page, 2, 10);
+    await expect(page.locator('#result')).toBeVisible();
+    await expect(page.locator('#result-title')).toHaveText('美味大成功！');
+    expect((await snapshot(page)).status).toBe('win');
+    await tap(page, '#next');
+    const next = await snapshot(page);
+    expect(next.level.id).toBe((level + 1) % 5 + 1); expect(next.score).toBe(0);
+    expect(next.moves).toBe(next.level.moves); expect(matches(next.board)).toEqual([]);
+  }
+  // Restrict random refill to a known non-matching pattern so the final move stays below target.
+  await load(page, fixture(0, true));
+  await page.evaluate(() => { const values = [.3, .55, .8]; let i = 0; Math.random = () => values[i++ % values.length]; });
+  await exchange(page, 2, 10);
+  await expect(page.locator('#result-title')).toHaveText('步数用完啦');
+  await expect(page.locator('#next')).toBeHidden();
+  expect((await snapshot(page)).status).toBe('lose'); expect((await snapshot(page)).moves).toBe(0);
+  await tap(page, '#restart');
+  const reset = await snapshot(page);
+  expect(reset.score).toBe(0); expect(reset.moves).toBe(30); expect(reset.status).toBe('playing'); expect(matches(reset.board)).toEqual([]);
+  expect(await page.evaluate(() => (window as any).__documentMarker)).toBe('same document');
+  expect(errors).toEqual([]);
+});
+test('visible cascades keep one move cost and restarting cancels pending animations', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.goto('/?e2e');
+  await load(page, { ...fixture(), score: 0 });
+  await page.evaluate(() => {
+    const values = [0, 0, 0, .3, .55, .8]; let i = 0;
+    const original = Math.random;
+    Math.random = () => i < values.length ? values[i++] : original();
+  });
+  await tap(page, '[data-index="2"]'); await tap(page, '[data-index="10"]');
+  await expect(page.locator('#hint')).toContainText('2 连锁！本轮 ×2，+120 分');
+  await expect.poll(async () => (await snapshot(page)).busy).toBe(false);
+  expect((await snapshot(page)).score).toBe(180); expect((await snapshot(page)).moves).toBe(29);
+  await expect(page.locator('#score')).toHaveText('180');
+  await expect(page.locator('#moves')).toHaveText('29');
+  await load(page, { ...fixture(), score: 0 });
+  await tap(page, '[data-index="2"]'); await tap(page, '[data-index="10"]');
+  await tap(page, '#retry');
+  const fresh = await snapshot(page);
+  await page.waitForTimeout(1000);
+  expect(await snapshot(page)).toEqual(fresh); expect(fresh.score).toBe(0); expect(fresh.moves).toBe(30);
 });

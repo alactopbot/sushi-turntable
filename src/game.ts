@@ -1,64 +1,93 @@
-import data from "./levels.json";
-export const TYPES = ["salmon", "tuna", "cucumber", "egg", "shrimp", "roe"] as const;
-export type Sushi = (typeof TYPES)[number];
-export type Level = { id: number; name: string; capacity: number; types: number; target: number; maxOnBelt: number; spawnMs: number; speed: number; path: string };
-// Frozen v2.1 level values; speed and path geometry are presentation settings.
+import data from './levels.json' with { type: 'json' };
+export const SIZE = 8;
+export const TYPES = ['salmon', 'tuna', 'cucumber', 'egg', 'shrimp', 'roe'] as const;
+export type Sushi = typeof TYPES[number];
+export type Board = (Sushi | null)[];
+export type Random = () => number;
+export type Level = { id: number; size: number; types: number; moves: number; target: number };
 export const LEVELS: readonly Level[] = data;
-export type Piece = { id: number; kind: Sushi; distance: number };
-export type State = { level: Level; plate: Sushi[]; belt: Piece[]; score: number; status: "playing" | "win" | "lose"; elapsed: number; nextId: number; served: number; recycled: number };
+export type State = { level: Level; board: Board; score: number; moves: number; status: 'playing' | 'win' | 'lose' };
+export type Wave = { before: Board; cleared: Board; fallen: Board; after: Board; groups: number[][]; removed: number[]; gain: number; multiplier: number };
+const pick = <T>(items: readonly T[], random: Random): T => items[Math.floor(random() * items.length)];
 export function points(length: number, wave = 1): number {
   return length < 3 ? 0 : 60 * (length - 2) * wave;
 }
-export function matches(plate: readonly Sushi[]): number[][] {
+export function matches(board: readonly (Sushi | null)[]): number[][] {
   const groups: number[][] = [];
-  for (let start = 0; start < plate.length;) {
-    let end = start + 1;
-    while (end < plate.length && plate[end] === plate[start]) end++;
-    if (end - start >= 3) groups.push(Array.from({ length: end - start }, (_, i) => start + i));
-    start = end;
+  for (const vertical of [false, true]) for (let line = 0; line < SIZE; line++) {
+    const at = (offset: number) => vertical ? offset * SIZE + line : line * SIZE + offset;
+    for (let start = 0; start < SIZE;) {
+      let end = start + 1;
+      while (end < SIZE && board[at(start)] != null && board[at(end)] === board[at(start)]) end++;
+      if (board[at(start)] != null && end - start >= 3) groups.push(Array.from({ length: end - start }, (_, i) => at(start + i)));
+      start = end;
+    }
   }
   return groups;
 }
-export function resolve(plate: readonly Sushi[]) {
-  let remaining = [...plate], score = 0;
-  const waves: { before: Sushi[]; removed: number[]; gain: number }[] = [];
-  for (let groups = matches(remaining); groups.length; groups = matches(remaining)) {
-    const removed = groups.flat();
-    const gain = groups.reduce((sum, group) => sum + points(group.length, waves.length + 1), 0);
-    waves.push({ before: remaining, removed, gain });
-    score += gain;
-    remaining = remaining.filter((_, i) => !removed.includes(i));
+export function generateBoard(types: number, random: Random = Math.random): Board {
+  const board: Board = [];
+  for (let i = 0; i < SIZE * SIZE; i++) {
+    const allowed = TYPES.slice(0, types).filter(kind =>
+      !(i % SIZE >= 2 && board[i - 1] === kind && board[i - 2] === kind) &&
+      !(i >= SIZE * 2 && board[i - SIZE] === kind && board[i - SIZE * 2] === kind));
+    board.push(pick(allowed, random));
   }
-  return { plate: remaining, score, waves };
+  return board;
 }
-export function outcome(state: Pick<State, "score" | "plate" | "level">): State["status"] {
-  if (state.score >= state.level.target) return "win";
-  return state.plate.length >= state.level.capacity && !matches(state.plate).length ? "lose" : "playing";
+export function adjacent(a: number, b: number): boolean {
+  return Number.isInteger(a) && Number.isInteger(b) && a >= 0 && b >= 0 && a < 64 && b < 64 &&
+    Math.abs(a % SIZE - b % SIZE) + Math.abs(Math.floor(a / SIZE) - Math.floor(b / SIZE)) === 1;
 }
-export function newGame(level: Level = LEVELS[0]): State {
-  return { level, plate: [], belt: [], score: 0, status: "playing", elapsed: level.spawnMs, nextId: 1, served: 0, recycled: 0 };
-}
-export function take(state: State, id: number) {
-  const index = state.belt.findIndex(piece => piece.id === id);
-  if (state.status !== "playing" || state.plate.length >= state.level.capacity || index < 0) return null;
-  const [piece] = state.belt.splice(index, 1);
-  const result = resolve([...state.plate, piece.kind]);
-  state.plate = result.plate;
-  state.score += result.score;
-  state.status = outcome(state);
+export function swap(board: Board, a: number, b: number): Board {
+  const result = [...board];
+  [result[a], result[b]] = [result[b], result[a]];
   return result;
 }
-export function advance(state: State, seconds: number, pathLength: number) {
-  if (state.status !== "playing" || seconds < 0) return;
-  state.belt.forEach(piece => piece.distance += state.level.speed * seconds);
-  const live = state.belt.filter(piece => piece.distance <= pathLength);
-  state.recycled += state.belt.length - live.length;
-  state.belt = live;
-  state.elapsed += seconds * 1000;
-  // Cycling supply guarantees every allowed type returns; waiting never causes failure.
-  // Spacing protects large touch targets; a blocked outlet waits instead of piling up.
-  if (state.elapsed >= state.level.spawnMs && state.belt.length < state.level.maxOnBelt && state.belt.every(piece => piece.distance >= 82)) {
-    state.belt.push({ id: state.nextId++, kind: TYPES[state.served++ % state.level.types], distance: 0 });
-    state.elapsed = 0;
+export function clear(board: Board, groups = matches(board)): Board {
+  const removed = new Set(groups.flat());
+  return board.map((kind, i) => removed.has(i) ? null : kind);
+}
+export function gravity(board: Board): Board {
+  const result: Board = Array(64).fill(null);
+  for (let col = 0; col < SIZE; col++) {
+    let bottom = SIZE - 1;
+    for (let row = SIZE - 1; row >= 0; row--) {
+      const kind = board[row * SIZE + col];
+      if (kind !== null) result[bottom-- * SIZE + col] = kind;
+    }
   }
+  return result;
+}
+export function refill(board: Board, types: number, random: Random = Math.random): Board {
+  return board.map(kind => kind ?? pick(TYPES.slice(0, types), random));
+}
+export function resolve(board: Board, types: number, random: Random = Math.random) {
+  let current = [...board], score = 0;
+  const waves: Wave[] = [];
+  for (let groups = matches(current); groups.length; groups = matches(current)) {
+    const multiplier = waves.length + 1;
+    // Score each maximal horizontal/vertical run; clear intersections only once.
+    const gain = groups.reduce((sum, group) => sum + points(group.length, multiplier), 0);
+    const cleared = clear(current, groups), fallen = gravity(cleared), after = refill(fallen, types, random);
+    waves.push({ before: current, cleared, fallen, after, groups, removed: [...new Set(groups.flat())], gain, multiplier });
+    score += gain;
+    current = after;
+  }
+  return { board: current, score, waves };
+}
+export function outcome(state: Pick<State, 'score' | 'moves' | 'level'>): State['status'] {
+  return state.score >= state.level.target ? 'win' : state.moves <= 0 ? 'lose' : 'playing';
+}
+export function newGame(level: Level = LEVELS[0], random: Random = Math.random): State {
+  return { level, board: generateBoard(level.types, random), score: 0, moves: level.moves, status: 'playing' };
+}
+export function playSwap(state: State, a: number, b: number, random: Random = Math.random) {
+  if (state.status !== 'playing' || !adjacent(a, b)) return { valid: false, state, waves: [] as Wave[] };
+  const exchanged = swap(state.board, a, b);
+  if (!matches(exchanged).length) return { valid: false, state, waves: [] as Wave[] };
+  const resolved = resolve(exchanged, state.level.types, random);
+  const next = { ...state, board: resolved.board, score: state.score + resolved.score, moves: state.moves - 1 };
+  next.status = outcome(next);
+  return { valid: true, state: next, waves: resolved.waves };
 }

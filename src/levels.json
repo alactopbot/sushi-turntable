@@ -1,57 +1,7 @@
 [
-  {
-    "id": 1,
-    "name": "第一份美味",
-    "capacity": 8,
-    "types": 3,
-    "target": 180,
-    "maxOnBelt": 4,
-    "spawnMs": 1200,
-    "speed": 76,
-    "path": "gentle"
-  },
-  {
-    "id": 2,
-    "name": "多一点选择",
-    "capacity": 7,
-    "types": 4,
-    "target": 300,
-    "maxOnBelt": 5,
-    "spawnMs": 1100,
-    "speed": 82,
-    "path": "long"
-  },
-  {
-    "id": 3,
-    "name": "转个弯想一想",
-    "capacity": 6,
-    "types": 4,
-    "target": 420,
-    "maxOnBelt": 5,
-    "spawnMs": 1000,
-    "speed": 90,
-    "path": "winding"
-  },
-  {
-    "id": 4,
-    "name": "小小料理师",
-    "capacity": 6,
-    "types": 5,
-    "target": 540,
-    "maxOnBelt": 6,
-    "spawnMs": 900,
-    "speed": 100,
-    "path": "extended"
-  },
-  {
-    "id": 5,
-    "name": "寿司大厨",
-    "capacity": 5,
-    "types": 5,
-    "target": 660,
-    "maxOnBelt": 6,
-    "spawnMs": 800,
-    "speed": 112,
-    "path": "deep"
-  }
+  { "id": 1, "size": 8, "types": 4, "moves": 30, "target": 800 },
+  { "id": 2, "size": 8, "types": 5, "moves": 26, "target": 1400 },
+  { "id": 3, "size": 8, "types": 5, "moves": 24, "target": 2000 },
+  { "id": 4, "size": 8, "types": 6, "moves": 22, "target": 2600 },
+  { "id": 5, "size": 8, "types": 6, "moves": 20, "target": 3200 }
 ]

@@ -1,229 +1,149 @@
-import "./style.css";
-import { LEVELS, advance, newGame, take, type Sushi } from "./game";
-import { makePath, measure } from "./path";
-const canvas = document.querySelector<HTMLCanvasElement>("#board")!;
-const ctx = canvas.getContext("2d")!;
+import './style.css';
+import { LEVELS, adjacent, newGame, playSwap, swap, type Board, type Sushi, type State, type Wave } from './game';
 const $ = (id: string) => document.getElementById(id)!;
-const progress = $("progress") as HTMLProgressElement;
-const RADIUS = 36, WIDTH = 520, HEIGHT = 570;
-let state = newGame();
-let path = makePath(state.level.path), route = measure(path);
-let waves: NonNullable<ReturnType<typeof take>>["waves"] = [];
-let animationStart = 0, previous = 0;
-const reduced = matchMedia("(prefers-reduced-motion: reduce)");
-const waveDuration = () => reduced.matches ? 240 : 550;
-const platePosition = (i: number) => ({ x: 40 + i * 440 / Math.max(1, state.level.capacity - 1), y: 510 });
-function circle(
-  x: number,
-  y: number,
-  radius: number,
-  fill: string,
-  stroke?: string,
-  width = 2,
-) {
-  ctx.beginPath();
-  ctx.arc(x, y, radius, 0, Math.PI * 2);
-  ctx.fillStyle = fill;
-  ctx.fill();
-  if (stroke) {
-    ctx.strokeStyle = stroke;
-    ctx.lineWidth = width;
-    ctx.stroke();
-  }
-}
-function rounded(
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  radius: number,
-  fill: string,
-  stroke?: string,
-) {
-  ctx.beginPath();
-  ctx.roundRect(x, y, width, height, radius);
-  ctx.fillStyle = fill;
-  ctx.fill();
-  if (stroke) {
-    ctx.strokeStyle = stroke;
-    ctx.lineWidth = 2.5;
-    ctx.stroke();
-  }
-}
-function line(points: number[], color: string, width: number) {
-  ctx.beginPath();
-  ctx.moveTo(points[0], points[1]);
-  for (let i = 2; i < points.length; i += 2)
-    ctx.lineTo(points[i], points[i + 1]);
-  ctx.strokeStyle = color;
-  ctx.lineWidth = width;
-  ctx.lineCap = "round";
-  ctx.stroke();
-}
-function sushi(
-  kind: Sushi,
-  p: { x: number; y: number },
-  scale = 1,
-  alpha = 1,
-  selected = false,
-) {
-  ctx.save();
-  ctx.translate(p.x, p.y);
-  ctx.scale(scale, scale);
-  ctx.globalAlpha = alpha;
-  if (selected) circle(0, 0, RADIUS + 6, "#f9d97e", "#ba7b2b", 3);
-  circle(0, 4, RADIUS, "#d5c4a5");
-  circle(
-    0,
-    0,
-    RADIUS,
-    selected ? "#fff3c6" : "#fffdf5",
-    selected ? "#bc883b" : "#d3c4a7",
-    2.5,
-  );
-  circle(0, 0, RADIUS - 7, "#f5eddc");
-  if (kind === "cucumber" || kind === "roe") {
-    rounded(-24, -21, 48, 45, 16, "#354c3c", "#293d30");
-    rounded(-20, -23, 40, 37, 14, "#fff9dc");
-    if (kind === "cucumber") {
-      circle(0, -5, 15, "#83b75d", "#426d3a", 3);
-      line([-7, -5, 7, -5], "#e5edaa", 3);
-      line([0, -12, 0, 2], "#e5edaa", 3);
-    } else {
-      for (const [x, y] of [
-        [-10, -12],
-        [3, -14],
-        [12, -5],
-        [-1, -3],
-        [-12, 1],
-        [4, 7],
-      ]) {
-        circle(x, y, 6.5, "#e9692e", "#a74625", 1.5);
-        circle(x - 1, y - 2, 1.7, "#ffd07b");
-      }
-    }
+const boardElement = $('board');
+const progress = $('progress') as HTMLProgressElement;
+const names: Record<Sushi, string> = { salmon: '三文鱼', tuna: '金枪', cucumber: '黄瓜卷', egg: '玉子', shrimp: '虾', roe: '鱼籽' };
+let state = newGame(), selected: number | null = null, busy = false, generation = 0;
+const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+const duration = (ms: number) => reduced.matches ? 30 : ms;
+const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, duration(ms)));
+// Local vector art keeps all six skins crisp, distinct, and available offline.
+function sushi(kind: Sushi) {
+  let top = '';
+  if (kind === 'cucumber' || kind === 'roe') {
+    top = '<rect x="10" y="13" width="44" height="42" rx="15" fill="#263f32"/><ellipse cx="32" cy="29" rx="22" ry="18" fill="#fffbdf"/>';
+    top += kind === 'cucumber'
+      ? '<ellipse cx="32" cy="28" rx="14" ry="12" fill="#69ad3c" stroke="#36702b" stroke-width="3"/><path d="M24 28h16M32 21v14" stroke="#e8ef9f" stroke-width="4" stroke-linecap="round"/>'
+      : [[22, 23], [34, 20], [43, 28], [31, 31], [21, 34], [38, 39]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="6" fill="#ec6226" stroke="#b63f20" stroke-width="1.5"/><circle cx="${x - 1}" cy="${y - 2}" r="1.6" fill="#ffcf82"/>`).join('');
   } else {
-    rounded(-26, -11, 52, 34, 13, "#fffdf2", "#d8cbb0");
-    if (kind === "salmon") {
-      rounded(-29, -24, 58, 31, 10, "#f38d61", "#c16b48");
-      for (const x of [-18, -3, 12]) line([x, -20, x + 10, 3], "#ffdab2", 4);
-    } else if (kind === "tuna") {
-      rounded(-29, -24, 58, 31, 10, "#ba4454", "#873b49");
-      line([-18, -14, 13, -14], "#f0858b", 3);
-      line([-11, -5, 21, -5], "#f0858b", 3);
-    } else if (kind === "egg") {
-      rounded(-29, -24, 58, 31, 6, "#f1cc4d", "#bf9933");
-      rounded(-7, -25, 14, 49, 3, "#3f5140");
-    } else {
-      ctx.save();
-      ctx.rotate(-0.22);
-      rounded(-27, -23, 48, 31, 14, "#ffc3b0", "#d18470");
-      for (const x of [-17, -6, 5]) line([x, -20, x + 2, 3], "#e3917b", 3);
-      ctx.beginPath();
-      ctx.moveTo(17, -9);
-      ctx.lineTo(31, -21);
-      ctx.lineTo(30, 7);
-      ctx.closePath();
-      ctx.fillStyle = "#e68c78";
-      ctx.fill();
-      ctx.restore();
+    top = '<rect x="9" y="24" width="46" height="29" rx="12" fill="#fffdf1" stroke="#d6cbb0" stroke-width="2"/>';
+    if (kind === 'salmon') top += '<rect x="6" y="12" width="52" height="27" rx="10" fill="#f18755" stroke="#b9633d" stroke-width="2"/><path d="m15 14 10 23m4-23 10 23m4-23 10 21" stroke="#ffe1b6" stroke-width="4"/>';
+    if (kind === 'tuna') top += '<rect x="6" y="12" width="52" height="27" rx="10" fill="#b82f4f" stroke="#852740" stroke-width="2"/><path d="M15 21h30M22 30h28" stroke="#ec8291" stroke-width="3" stroke-linecap="round"/>';
+    if (kind === 'egg') top += '<rect x="6" y="12" width="52" height="28" rx="6" fill="#f7d547" stroke="#bc9427" stroke-width="2"/><path d="M14 18h13" stroke="#fff09d" stroke-width="3"/><rect x="28" y="11" width="12" height="42" rx="2" fill="#304839"/>';
+    if (kind === 'shrimp') top += '<path d="m46 25 13-13-1 26Z" fill="#e17c66"/><rect x="6" y="12" width="44" height="28" rx="14" fill="#ffbea7" stroke="#c37662" stroke-width="2"/><path d="m16 15 3 21m8-23 3 24m8-21 3 18" stroke="#e68b73" stroke-width="3"/>';
+  }
+  return `<svg viewBox="0 0 64 64" aria-hidden="true">${top}<circle cx="26" cy="46" r="1.5" fill="#354638"/><circle cx="39" cy="46" r="1.5" fill="#354638"/><path d="M30 48q2 3 4 0" fill="none" stroke="#354638" stroke-width="1.5" stroke-linecap="round"/></svg>`;
+}
+const cells = Array.from({ length: 64 }, (_, i) => {
+  const button = document.createElement('button');
+  button.type = 'button'; button.className = 'cell'; button.dataset.index = String(i);
+  button.addEventListener('click', () => void select(i));
+  boardElement.append(button);
+  return button;
+});
+function render(board: Board = state.board) {
+  cells.forEach((cell, i) => {
+    cell.innerHTML = board[i] ? sushi(board[i]!) : '';
+    cell.classList.toggle('selected', selected === i);
+    cell.setAttribute('aria-pressed', String(selected === i));
+    cell.setAttribute('aria-label', `${Math.floor(i / 8) + 1}行${i % 8 + 1}列 ${board[i] ? names[board[i]!] : '空格'}`);
+  });
+}
+function hud(score = state.score, moves = state.moves) {
+  $('level').textContent = String(state.level.id);
+  $('score').textContent = String(score); $('target').textContent = String(state.level.target);
+  $('moves').textContent = String(moves);
+  $('types').textContent = `8×8 · ${state.level.types} 种寿司`;
+  progress.max = state.level.target; progress.value = score;
+}
+async function animateSwap(a: number, b: number) {
+  const first = cells[a].getBoundingClientRect(), second = cells[b].getBoundingClientRect();
+  const dx = second.x - first.x, dy = second.y - first.y;
+  await Promise.all([a, b].map((index, n) => cells[index].querySelector('svg')!.animate([
+    { transform: 'translate(0, 0)' }, { transform: `translate(${dx * (n ? -1 : 1)}px, ${dy * (n ? -1 : 1)}px)` },
+  ], { duration: duration(190), easing: 'ease-in-out' }).finished.catch(() => {})));
+}
+async function animateFall(wave: Wave) {
+  render(wave.after);
+  const step = cells[8].getBoundingClientRect().y - cells[0].getBoundingClientRect().y;
+  const animations: Promise<unknown>[] = [];
+  for (let col = 0; col < 8; col++) {
+    const survivors = Array.from({ length: 8 }, (_, row) => row).filter(row => wave.cleared[row * 8 + col] !== null);
+    const empty = 8 - survivors.length;
+    for (let row = 0; row < 8; row++) {
+      const from = row < empty ? row - empty : survivors[row - empty];
+      if (from === row) continue;
+      animations.push(cells[row * 8 + col].querySelector('svg')!.animate([
+        { transform: `translateY(${(from - row) * step}px)`, opacity: row < empty ? 0 : 1 },
+        { transform: 'translateY(0)', opacity: 1 },
+      ], { duration: duration(330), easing: 'cubic-bezier(.3,.1,.5,1)' }).finished.catch(() => {}));
     }
   }
-  ctx.restore();
+  await Promise.all(animations);
 }
-
-function label(text: string, x: number, y: number, size = 18, color = "#4b5946") {
-  ctx.fillStyle = color; ctx.font = `700 ${size}px system-ui`;
-  ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(text, x, y);
-}
-function draw(now = performance.now()) {
-  ctx.setTransform(canvas.width / WIDTH, 0, 0, canvas.height / HEIGHT, 0, 0);
-  ctx.clearRect(0, 0, WIDTH, HEIGHT);
-  ctx.lineCap = "round"; ctx.lineJoin = "round";
-  for (const [width, color] of [[86, "#c4b89b"], [76, "#eee4cd"], [56, "#d9ccb0"]] as const) {
-    ctx.beginPath(); path.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
-    ctx.lineWidth = width; ctx.strokeStyle = color; ctx.stroke();
+async function select(index: number) {
+  if (busy || state.status !== 'playing') return;
+  if (selected === null || !adjacent(selected, index)) {
+    selected = selected === index ? null : index; render(); return;
   }
-  ctx.setLineDash([3, 18]); ctx.lineWidth = 2; ctx.strokeStyle = "#a99b7c"; ctx.stroke(); ctx.setLineDash([]);
-  const first = path[0], last = path.at(-1)!;
-  rounded(first.x - 48, first.y - 52, 96, 36, 12, "#566e4b");
-  label("出餐口 →", first.x, first.y - 34, 16, "#fffdf3");
-  label("回收", last.x, last.y + 51, 15);
-  for (const piece of state.belt) sushi(piece.kind, route.at(piece.distance));
-  rounded(6, 460, 508, 102, 22, "#fff9e9", "#d8c7a4");
-  label(`我的盘子  ${state.plate.length}/${state.level.capacity} 格 · 从左到右入盘`, 260, 441, 17);
-  const wave = waves[0];
-  const t = wave ? Math.min(1, (now - animationStart) / waveDuration()) : 0;
-  const plate = wave?.before ?? state.plate;
-  for (let i = 0; i < state.level.capacity; i++) {
-    const p = platePosition(i);
-    circle(p.x, p.y, 26, "#efe8d7", "#d4c7b0");
-    if (plate[i]) sushi(plate[i], p, .68, wave?.removed.includes(i) ? 1 - t : 1);
-    else label(String(i + 1), p.x, p.y, 14, "#9b8c73");
+  const a = selected, token = generation;
+  selected = null; busy = true; render();
+  const result = playSwap(state, a, index);
+  await animateSwap(a, index);
+  if (token !== generation) return;
+  render(swap(state.board, a, index));
+  if (!result.valid) {
+    await pause(90);
+    if (token !== generation) return;
+    await animateSwap(a, index);
+    if (token !== generation) return;
+    render(); busy = false;
+    $('hint').textContent = '还没连成三个，换回来啦，不扣步！';
+    return;
   }
-  if (wave) {
-    rounded(173, 353 - t * 24, 174, 53, 16, "#fff2bb", "#e0ac53");
-    label(`+${wave.gain}`, 260, 380 - t * 24, 32, "#b55533");
+  let displayedScore = state.score;
+  hud(displayedScore, result.state.moves);
+  for (const wave of result.waves) {
+    render(wave.before);
+    $('hint').textContent = wave.multiplier === 1 ? `好吃！+${wave.gain} 分` : `${wave.multiplier} 连锁！本轮 ×${wave.multiplier}，+${wave.gain} 分`;
+    $('float-score').textContent = `${wave.multiplier > 1 ? `×${wave.multiplier} ` : ''}+${wave.gain}`;
+    $('float-score').animate([{ opacity: 0, transform: 'translateY(12px)' }, { opacity: 1, offset: .25 }, { opacity: 0, transform: 'translateY(-30px)' }], { duration: duration(650) });
+    await Promise.all(wave.removed.map(i => cells[i].querySelector('svg')!.animate([
+      { transform: 'scale(1)', opacity: 1 }, { transform: 'scale(1.18)', offset: .3 }, { transform: 'scale(.2)', opacity: 0 },
+    ], { duration: duration(280), fill: 'forwards' }).finished.catch(() => {})));
+    if (token !== generation) return;
+    displayedScore += wave.gain; hud(displayedScore, result.state.moves);
+    render(wave.cleared); await pause(80);
+    if (token !== generation) return;
+    await animateFall(wave);
+    if (token !== generation) return;
+    await pause(140);
+    if (token !== generation) return;
   }
-}
-function hud() {
-  $("level").textContent = String(state.level.id);
-  $("level-name").textContent = state.level.name;
-  $("score").textContent = String(state.score);
-  $("target").textContent = String(state.level.target);
-  $("capacity").textContent = `${state.level.capacity} 格 · ${state.level.types} 种寿司`;
-  progress.max = state.level.target; progress.value = state.score;
+  state = result.state; busy = false; $('float-score').textContent = ''; render(); hud(); finish();
 }
 function finish() {
-  if (state.status === "playing") return;
-  const win = state.status === "win";
-  $("result-title").textContent = win ? "美味大成功！" : "盘子装满啦";
-  $("result-copy").textContent = win ? `收集了 ${state.score} 分${state.level.id === 5 ? "，五关全部完成！" : "，准备下一关吧！"}` : `收集了 ${state.score} / ${state.level.target} 分，再试一次吧。`;
-  $("next").hidden = !win;
-  $("next").textContent = state.level.id === 5 ? "从第一关再玩" : "下一关";
-  $("result").hidden = false;
-  (win ? $("next") : $("restart")).focus({ preventScroll: true });
+  if (state.status === 'playing') return;
+  const win = state.status === 'win';
+  $('result-title').textContent = win ? '美味大成功！' : '步数用完啦';
+  $('result-copy').textContent = win ? `获得 ${state.score} 分${state.level.id === LEVELS.length ? '，五关全部完成！' : '，准备下一关吧！'}` : `获得 ${state.score} / ${state.level.target} 分，再试一次吧。`;
+  $('next').hidden = !win;
+  $('next').textContent = state.level.id === LEVELS.length ? '从第一关再玩' : '下一关';
+  $('result').hidden = false; boardElement.inert = true; $('retry').inert = true;
+  (win ? $('next') : $('restart')).focus({ preventScroll: true });
 }
 function start(index: number) {
-  state = newGame(LEVELS[index]); path = makePath(state.level.path); route = measure(path);
-  waves = []; previous = 0; $("result").hidden = true;
-  $("hint").textContent = "点线上任意寿司，放到盘尾 →"; hud(); draw();
+  generation++; state = newGame(LEVELS[index]); selected = null; busy = false;
+  document.getAnimations().forEach(animation => animation.cancel());
+  $('result').hidden = true; boardElement.inert = false; $('retry').inert = false;
+  $('float-score').textContent = ''; $('hint').textContent = '点一块寿司，再点它上下左右的伙伴';
+  render(); hud();
 }
-canvas.addEventListener("pointerdown", event => {
-  if (!event.isPrimary || event.button !== 0 || waves.length || state.status !== "playing") return;
+$('restart').addEventListener('click', () => { start(state.level.id - 1); cells[0].focus({ preventScroll: true }); });
+$('retry').addEventListener('click', () => start(state.level.id - 1));
+$('next').addEventListener('click', () => { start(state.level.id % LEVELS.length); cells[0].focus({ preventScroll: true }); });
+$('result').addEventListener('keydown', event => {
+  if (event.key !== 'Tab') return;
   event.preventDefault();
-  const box = canvas.getBoundingClientRect();
-  const x = (event.clientX - box.left) * WIDTH / box.width;
-  const y = (event.clientY - box.top) * HEIGHT / box.height;
-  const nearest = state.belt.map(piece => ({ piece, d: Math.hypot(x - route.at(piece.distance).x, y - route.at(piece.distance).y) }))
-    .filter(item => item.d <= 39).sort((a, b) => a.d - b.d)[0];
-  if (!nearest) return;
-  const result = take(state, nearest.piece.id);
-  if (!result) return;
-  waves = [...result.waves]; animationStart = performance.now();
-  $("hint").textContent = waves.length ? `好吃！+${result.score} 分${waves.length > 1 ? ` · ${waves.length} 次连锁` : ""}` : "已放到盘尾，盘子不能换顺序哦";
-  hud(); if (!waves.length) finish(); draw();
+  const target = !$('next').hidden && document.activeElement === $('restart') ? $('next') : $('restart');
+  target.focus();
 });
-$("restart").addEventListener("click", () => start(state.level.id - 1));
-$("retry").addEventListener("click", () => start(state.level.id - 1));
-$("next").addEventListener("click", () => start(state.level.id % LEVELS.length));
-new ResizeObserver(() => {
-  const ratio = Math.min(devicePixelRatio || 1, 3);
-  canvas.width = Math.round(canvas.clientWidth * ratio);
-  canvas.height = Math.round(canvas.clientWidth * HEIGHT / WIDTH * ratio); draw();
-}).observe(canvas);
-function tick(now: number) {
-  const dt = previous ? Math.min(.05, (now - previous) / 1000) : 0; previous = now;
-  if (waves.length) {
-    if (now - animationStart >= waveDuration()) {
-      waves.shift(); animationStart = now; if (!waves.length) finish();
-    }
-  } else if (!document.hidden) advance(state, dt, route.length);
-  draw(now); requestAnimationFrame(tick);
+render(); hud();
+// Read-only state in development; deterministic fixture loading is opt-in for E2E only.
+if (import.meta.env.DEV) {
+  Object.defineProperty(window, '__sushi', { get: () => structuredClone({ ...state, busy }) });
+  if (new URLSearchParams(location.search).has('e2e')) Object.defineProperty(window, '__loadSushi', {
+    value: (fixture: State) => { start(fixture.level.id - 1); state = structuredClone(fixture); render(); hud(); finish(); },
+  });
 }
-hud(); requestAnimationFrame(tick);
-// Browser acceptance tests observe state; production exposes no test interface.
-if (import.meta.env.DEV) Object.defineProperty(window, "__sushi", {
-  get: () => structuredClone({ ...state, busy: waves.length > 0,
-    positions: state.belt.map(piece => ({ id: piece.id, ...route.at(piece.distance) })) }),
-});
