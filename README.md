@@ -2,6 +2,8 @@
 
 儿童益智小游戏：点选一格寿司，再点相邻格交换；同款连续三个或更多就消掉。在 20 步内收集 300 分。Vite + TypeScript + 原生 Canvas 2D，纯静态，无后端、账号或外部字体/图片请求。
 
+公开游玩地址：**https://alactopbot.github.io/sushi-turntable/**
+
 ## 本地运行
 
 Node.js 20.19+（推荐 22），npm：
@@ -65,10 +67,12 @@ npm run test:e2e
 `npm run build` 产物为 `dist/`。`base: './'` 支持站点根目录及 GitHub Pages 仓库子路径，不需要服务端路由重写。
 
 - **Cloudflare Pages**：连接仓库，生产分支 `main`，构建命令 `npm run build`，输出目录 `dist`，Node.js 22。
-- **GitHub Pages**：将 `dist/` 作为 Pages 静态产物部署；Settings → Pages 使用 GitHub Actions 部署来源。现有工作流只负责构建和上传 `static-site` artifact，可由后续 Pages 部署工作流接入。
-- `.github/workflows/build.yml` 对 `main` push 和 PR 执行 `npm ci` → `npm test` → `npm run build`。浏览器验收单独运行，不增加最小构建 CI 的浏览器安装负担。
+- **GitHub Pages（生产）**：Settings → Pages 的 Source 设为 **GitHub Actions**。`.github/workflows/build.yml` 对 `main` push 和 PR 执行 `npm ci` → `npm test` → `npm run build`；仅 `main` 在构建成功后通过 `actions/upload-pages-artifact` 上传 `dist/`，再由 `actions/deploy-pages` 部署到上述公开地址。也支持在 Actions 中选择 main 手动运行；PR 只构建，不部署。
+- [构建与部署记录](https://github.com/alactopbot/sushi-turntable/actions/workflows/build.yml)：查看 `build`、`deploy` 两个 job 与 `github-pages` 环境链接。浏览器验收单独运行，不增加最小构建 CI 的浏览器安装负担。
 
-本交付配置构建接口；域名、DNS 和托管站点开通不属于本次实现。
+回滚：在 Actions → Build 中打开上一条成功部署的运行，选择 **Re-run all jobs**，重新构建并部署该运行原来的 commit（需 GitHub 仍允许重跑）；或对引入问题的提交执行 `git revert <commit>` 并 push 到 `main`，自动触发部署。回滚后确认 `deploy` 成功并刷新公开页面；重跑旧运行不会改变 main，后续 main push 会再次发布 main 的版本。
+
+使用 GitHub Pages 默认免费子域，不设置自定义域名，不更改 DNS。
 
 ## 文件
 
