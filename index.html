@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#faf5e9" />
+    <meta
+      name="description"
+      content="换相邻寿司，连成三个就消掉。适合亲子一起玩的寿司转盘小游戏。"
+    />
+    <title>寿司转盘 · 开动啦！</title>
+  </head>
+  <body>
+    <main>
+      <header>
+        <span class="eyebrow">小小厨房 · 第一盘</span>
+        <h1>寿司转盘<span>开动啦！</span></h1>
+        <p>换相邻寿司，连成三个就消掉。</p>
+      </header>
+      <section class="game" aria-label="寿司转盘游戏">
+        <div class="hud">
+          <div class="moves">
+            <span>剩余步数</span><strong id="moves">20</strong>
+          </div>
+          <div class="score">
+            <div>
+              <span>收集美味</span
+              ><span><strong id="score">0</strong> / 300 分</span>
+            </div>
+            <progress
+              id="progress"
+              value="0"
+              max="300"
+              aria-label="目标分进度"
+            ></progress>
+          </div>
+        </div>
+        <div class="board">
+          <canvas id="board" aria-label="十二格寿司转盘，点一格再点相邻格交换"
+            >请使用支持 Canvas 的浏览器。</canvas
+          >
+          <div id="result" class="result" hidden>
+            <div class="result-card">
+              <span id="result-icon" class="result-icon"></span>
+              <h2 id="result-title"></h2>
+              <p id="result-copy"></p>
+              <button id="restart" type="button">
+                再来一盘 <span>↻</span>
+              </button>
+            </div>
+          </div>
+        </div>
+        <p id="hint" class="hint" role="status" aria-live="polite">
+          点一格，再点旁边的一格
+        </p>
+        <div class="instructions">
+          <span><b>1</b> 点选寿司</span><span><b>2</b> 换相邻的</span
+          ><span><b>3</b> 三个就消</span>
+        </div>
+      </section>
+      <footer>
+        一盘 20 步 · 收集 300 分<br /><span
+          >六种寿司，一起找到美味的排列。</span
+        >
+      </footer>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
