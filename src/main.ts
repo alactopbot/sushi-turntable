@@ -1,44 +1,18 @@
 import "./style.css";
-import {
-  CONFIG,
-  matches,
-  newGame,
-  outcome,
-  points,
-  refill,
-  select,
-  swap,
-  type Slide,
-  type Sushi,
-} from "./game";
-
+import { LEVELS, advance, newGame, take, type Sushi } from "./game";
+import { makePath, measure } from "./path";
 const canvas = document.querySelector<HTMLCanvasElement>("#board")!;
 const ctx = canvas.getContext("2d")!;
-const movesLabel = document.querySelector("#moves")!;
-const scoreLabel = document.querySelector("#score")!;
-const progress = document.querySelector<HTMLProgressElement>("#progress")!;
-const hint = document.querySelector("#hint")!;
-const result = document.querySelector<HTMLElement>("#result")!;
-const restart = document.querySelector<HTMLButtonElement>("#restart")!;
+const $ = (id: string) => document.getElementById(id)!;
+const progress = $("progress") as HTMLProgressElement;
+const RADIUS = 36, WIDTH = 520, HEIGHT = 570;
 let state = newGame();
-const SIZE = 520,
-  CENTER = 260,
-  RING = 199,
-  RADIUS = 43;
-type Animation =
-  | { kind: "swap"; pair: [number, number]; t: number }
-  | { kind: "pop"; removed: number[]; t: number; gain: number; wave: number }
-  | { kind: "slide"; slides: Slide[]; t: number };
-let animation: Animation | null = null;
-const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-
-function position(index: number) {
-  const angle = -Math.PI / 2 + (index * Math.PI) / 6;
-  return {
-    x: CENTER + Math.cos(angle) * RING,
-    y: CENTER + Math.sin(angle) * RING,
-  };
-}
+let path = makePath(state.level.path), route = measure(path);
+let waves: NonNullable<ReturnType<typeof take>>["waves"] = [];
+let animationStart = 0, previous = 0;
+const reduced = matchMedia("(prefers-reduced-motion: reduce)");
+const waveDuration = () => reduced.matches ? 240 : 550;
+const platePosition = (i: number) => ({ x: 40 + i * 440 / Math.max(1, state.level.capacity - 1), y: 510 });
 function circle(
   x: number,
   y: number,
@@ -88,12 +62,11 @@ function line(points: number[], color: string, width: number) {
 }
 function sushi(
   kind: Sushi,
-  index: number,
+  p: { x: number; y: number },
   scale = 1,
   alpha = 1,
   selected = false,
 ) {
-  const p = position(index);
   ctx.save();
   ctx.translate(p.x, p.y);
   ctx.scale(scale, scale);
@@ -158,186 +131,99 @@ function sushi(
   }
   ctx.restore();
 }
-function draw() {
-  const ratio = canvas.width / SIZE;
-  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-  ctx.clearRect(0, 0, SIZE, SIZE);
-  circle(CENTER, CENTER + 6, 251, "#e0d0ae");
-  circle(CENTER, CENTER, 251, "#eadbbc", "#d5c29a", 2);
-  circle(CENTER, CENTER, 242, "#f5e9cf", "#fff8e6", 2);
-  circle(CENTER, CENTER, 149, "#dfcfaa", "#cbbb95");
-  circle(CENTER, CENTER, 141, "#fffaf0", "#f4ebd8", 4);
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.font = "700 13px system-ui";
-  ctx.fillStyle = "#9c8a6b";
-  ctx.fillText("美 味 回 转 中", CENTER, CENTER - 57);
-  ctx.font = "800 33px system-ui";
-  ctx.fillStyle = "#61754e";
-  ctx.fillText("凑齐三个", CENTER, CENTER - 12);
-  ctx.font = "600 17px system-ui";
-  ctx.fillStyle = "#97846a";
-  ctx.fillText("一样的，就消掉", CENTER, CENTER + 27);
-  ctx.fillStyle = "#d9a753";
-  ctx.font = "24px system-ui";
-  ctx.fillText("✦   ✦   ✦", CENTER, CENTER + 69);
-  if (animation?.kind === "slide") {
-    for (const s of animation.slides) {
-      const t = animation.t;
-      sushi(
-        s.sushi,
-        s.from + (s.to - s.from) * t,
-        s.fresh ? 0.6 + t * 0.4 : 1,
-        s.fresh ? t : 1,
-      );
-    }
-  } else {
-    state.board.forEach((kind, i) => {
-      let index = i,
-        scale = 1,
-        alpha = 1;
-      if (animation?.kind === "swap") {
-        const [a, b] = animation.pair;
-        const delta = b - a === 11 ? -1 : b - a === -11 ? 1 : b - a;
-        if (i === a) index += delta * animation.t;
-        if (i === b) index -= delta * animation.t;
-      }
-      if (animation?.kind === "pop" && animation.removed.includes(i)) {
-        scale = 1 + Math.sin(animation.t * Math.PI) * 0.3;
-        alpha = 1 - animation.t;
-      }
-      sushi(kind, index, scale, alpha, state.selected === i);
-    });
-  }
-  if (animation?.kind === "pop") {
-    ctx.save();
-    ctx.globalAlpha = 1 - Math.max(0, animation.t - 0.7) / 0.3;
-    rounded(170, 224 - animation.t * 28, 180, 69, 20, "#fff3c6", "#dfb461");
-    ctx.fillStyle = "#b95a33";
-    ctx.font = "900 36px system-ui";
-    ctx.fillText(`+${animation.gain}`, CENTER, 259 - animation.t * 28);
-    ctx.restore();
-  }
-}
-function resize() {
-  const size = Math.round(
-    canvas.getBoundingClientRect().width *
-      Math.min(window.devicePixelRatio || 1, 3),
-  );
-  canvas.width = size;
-  canvas.height = size;
-  draw();
-}
-new ResizeObserver(resize).observe(canvas);
-function hud() {
-  movesLabel.textContent = String(state.moves);
-  scoreLabel.textContent = String(state.score);
-  progress.value = state.score;
-}
-async function animate(frame: Animation, duration: number) {
-  const start = performance.now();
-  const length = reducedMotion.matches ? Math.min(duration, 100) : duration;
-  await new Promise<void>((resolve) => {
-    function tick(now: number) {
-      const linear = Math.min(1, (now - start) / length);
-      frame.t = linear * linear * (3 - 2 * linear);
-      animation = frame;
-      draw();
-      if (linear < 1) requestAnimationFrame(tick);
-      else resolve();
-    }
-    requestAnimationFrame(tick);
-  });
-  animation = null;
-}
-async function play(pair: [number, number]) {
-  hud();
-  hint.textContent = "寿司换个位置…";
-  await animate({ kind: "swap", pair, t: 0 }, 200);
-  state.board = swap(state.board, ...pair);
-  let wave = 1;
-  for (
-    let groups = matches(state.board);
-    groups.length;
-    groups = matches(state.board)
-  ) {
-    const gain = groups.reduce((sum, g) => sum + points(g.length, wave), 0);
-    state.score += gain;
-    hud();
-    hint.textContent =
-      wave === 1 ? "好吃！凑到一起啦" : `好吃！连续消掉 ${wave} 次`;
-    await animate(
-      { kind: "pop", removed: groups.flat(), gain, wave, t: 0 },
-      430,
-    );
-    const next = refill(state.board, groups);
-    await animate({ kind: "slide", slides: next.slides, t: 0 }, 360);
-    state.board = next.board;
-    wave++;
-  }
-  state.busy = false;
-  const ending = outcome(state);
-  hint.textContent = ending
-    ? "再来一盘，发现新的美味"
-    : wave > 1
-      ? "好吃！再找找三个一样的"
-      : "换相邻的，每换一次用一步";
-  if (ending) {
-    document.querySelector("#result-icon")!.textContent =
-      ending === "win" ? "★ ★ ★" : "♡";
-    document.querySelector("#result-title")!.textContent =
-      ending === "win" ? "美味大成功！" : "这一盘吃完啦";
-    document.querySelector("#result-copy")!.textContent =
-      ending === "win"
-        ? `收集了 ${state.score} 分，好吃！`
-        : `收集了 ${state.score} 分，再试试凑到 300 分吧`;
-    result.hidden = false;
-    restart.focus({ preventScroll: true });
-  }
-  draw();
-}
-canvas.addEventListener("pointerdown", (event) => {
-  if (!event.isPrimary || event.button !== 0 || state.busy || outcome(state))
-    return;
-  event.preventDefault();
-  const rect = canvas.getBoundingClientRect();
-  const x = ((event.clientX - rect.left) * SIZE) / rect.width,
-    y = ((event.clientY - rect.top) * SIZE) / rect.height;
-  let best = -1,
-    distance = Infinity;
-  for (let i = 0; i < CONFIG.slots; i++) {
-    const p = position(i),
-      d = Math.hypot(x - p.x, y - p.y);
-    if (d <= RADIUS * 1.14 && d < distance) {
-      best = i;
-      distance = d;
-    }
-  }
-  if (best < 0) return;
-  const pair = select(state, best);
-  if (pair) void play(pair);
-  else {
-    hint.textContent =
-      state.selected === null
-        ? "点一格，再点旁边的一格"
-        : "选好啦，点它旁边的寿司";
-    draw();
-  }
-});
-restart.addEventListener("click", () => {
-  state = newGame();
-  animation = null;
-  result.hidden = true;
-  hint.textContent = "点一格，再点旁边的一格";
-  hud();
-  draw();
-});
-hud();
-resize();
 
-// Read-only snapshots let browser acceptance tests play through actual pointers.
-if (import.meta.env.DEV) {
-  Object.defineProperty(window, "__sushi", {
-    get: () => structuredClone(state),
-  });
+function label(text: string, x: number, y: number, size = 18, color = "#4b5946") {
+  ctx.fillStyle = color; ctx.font = `700 ${size}px system-ui`;
+  ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(text, x, y);
 }
+function draw(now = performance.now()) {
+  ctx.setTransform(canvas.width / WIDTH, 0, 0, canvas.height / HEIGHT, 0, 0);
+  ctx.clearRect(0, 0, WIDTH, HEIGHT);
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  for (const [width, color] of [[86, "#c4b89b"], [76, "#eee4cd"], [56, "#d9ccb0"]] as const) {
+    ctx.beginPath(); path.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+    ctx.lineWidth = width; ctx.strokeStyle = color; ctx.stroke();
+  }
+  ctx.setLineDash([3, 18]); ctx.lineWidth = 2; ctx.strokeStyle = "#a99b7c"; ctx.stroke(); ctx.setLineDash([]);
+  const first = path[0], last = path.at(-1)!;
+  rounded(first.x - 48, first.y - 52, 96, 36, 12, "#566e4b");
+  label("出餐口 →", first.x, first.y - 34, 16, "#fffdf3");
+  label("回收", last.x, last.y + 51, 15);
+  for (const piece of state.belt) sushi(piece.kind, route.at(piece.distance));
+  rounded(6, 460, 508, 102, 22, "#fff9e9", "#d8c7a4");
+  label(`我的盘子  ${state.plate.length}/${state.level.capacity} 格 · 从左到右入盘`, 260, 441, 17);
+  const wave = waves[0];
+  const t = wave ? Math.min(1, (now - animationStart) / waveDuration()) : 0;
+  const plate = wave?.before ?? state.plate;
+  for (let i = 0; i < state.level.capacity; i++) {
+    const p = platePosition(i);
+    circle(p.x, p.y, 26, "#efe8d7", "#d4c7b0");
+    if (plate[i]) sushi(plate[i], p, .68, wave?.removed.includes(i) ? 1 - t : 1);
+    else label(String(i + 1), p.x, p.y, 14, "#9b8c73");
+  }
+  if (wave) {
+    rounded(173, 353 - t * 24, 174, 53, 16, "#fff2bb", "#e0ac53");
+    label(`+${wave.gain}`, 260, 380 - t * 24, 32, "#b55533");
+  }
+}
+function hud() {
+  $("level").textContent = String(state.level.id);
+  $("level-name").textContent = state.level.name;
+  $("score").textContent = String(state.score);
+  $("target").textContent = String(state.level.target);
+  $("capacity").textContent = `${state.level.capacity} 格 · ${state.level.types} 种寿司`;
+  progress.max = state.level.target; progress.value = state.score;
+}
+function finish() {
+  if (state.status === "playing") return;
+  const win = state.status === "win";
+  $("result-title").textContent = win ? "美味大成功！" : "盘子装满啦";
+  $("result-copy").textContent = win ? `收集了 ${state.score} 分${state.level.id === 5 ? "，五关全部完成！" : "，准备下一关吧！"}` : `收集了 ${state.score} / ${state.level.target} 分，再试一次吧。`;
+  $("next").hidden = !win;
+  $("next").textContent = state.level.id === 5 ? "从第一关再玩" : "下一关";
+  $("result").hidden = false;
+  (win ? $("next") : $("restart")).focus({ preventScroll: true });
+}
+function start(index: number) {
+  state = newGame(LEVELS[index]); path = makePath(state.level.path); route = measure(path);
+  waves = []; previous = 0; $("result").hidden = true;
+  $("hint").textContent = "点线上任意寿司，放到盘尾 →"; hud(); draw();
+}
+canvas.addEventListener("pointerdown", event => {
+  if (!event.isPrimary || event.button !== 0 || waves.length || state.status !== "playing") return;
+  event.preventDefault();
+  const box = canvas.getBoundingClientRect();
+  const x = (event.clientX - box.left) * WIDTH / box.width;
+  const y = (event.clientY - box.top) * HEIGHT / box.height;
+  const nearest = state.belt.map(piece => ({ piece, d: Math.hypot(x - route.at(piece.distance).x, y - route.at(piece.distance).y) }))
+    .filter(item => item.d <= 39).sort((a, b) => a.d - b.d)[0];
+  if (!nearest) return;
+  const result = take(state, nearest.piece.id);
+  if (!result) return;
+  waves = [...result.waves]; animationStart = performance.now();
+  $("hint").textContent = waves.length ? `好吃！+${result.score} 分${waves.length > 1 ? ` · ${waves.length} 次连锁` : ""}` : "已放到盘尾，盘子不能换顺序哦";
+  hud(); if (!waves.length) finish(); draw();
+});
+$("restart").addEventListener("click", () => start(state.level.id - 1));
+$("retry").addEventListener("click", () => start(state.level.id - 1));
+$("next").addEventListener("click", () => start(state.level.id % LEVELS.length));
+new ResizeObserver(() => {
+  const ratio = Math.min(devicePixelRatio || 1, 3);
+  canvas.width = Math.round(canvas.clientWidth * ratio);
+  canvas.height = Math.round(canvas.clientWidth * HEIGHT / WIDTH * ratio); draw();
+}).observe(canvas);
+function tick(now: number) {
+  const dt = previous ? Math.min(.05, (now - previous) / 1000) : 0; previous = now;
+  if (waves.length) {
+    if (now - animationStart >= waveDuration()) {
+      waves.shift(); animationStart = now; if (!waves.length) finish();
+    }
+  } else if (!document.hidden) advance(state, dt, route.length);
+  draw(now); requestAnimationFrame(tick);
+}
+hud(); requestAnimationFrame(tick);
+// Browser acceptance tests observe state; production exposes no test interface.
+if (import.meta.env.DEV) Object.defineProperty(window, "__sushi", {
+  get: () => structuredClone({ ...state, busy: waves.length > 0,
+    positions: state.belt.map(piece => ({ id: piece.id, ...route.at(piece.distance) })) }),
+});

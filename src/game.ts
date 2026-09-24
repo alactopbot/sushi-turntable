@@ -1,159 +1,64 @@
-export const TYPES = [
-  "salmon",
-  "tuna",
-  "cucumber",
-  "egg",
-  "shrimp",
-  "roe",
-] as const;
+import data from "./levels.json";
+export const TYPES = ["salmon", "tuna", "cucumber", "egg", "shrimp", "roe"] as const;
 export type Sushi = (typeof TYPES)[number];
-export const CONFIG = { slots: 12, moves: 20, target: 300 } as const;
-export type Random = () => number;
-export type State = {
-  board: Sushi[];
-  moves: number;
-  score: number;
-  selected: number | null;
-  busy: boolean;
-};
-export const randomSushi = (random: Random): Sushi =>
-  TYPES[Math.floor(random() * TYPES.length)];
-export const adjacent = (
-  a: number,
-  b: number,
-  length = CONFIG.slots,
-): boolean =>
-  a !== b && (Math.abs(a - b) === 1 || Math.abs(a - b) === length - 1);
-
-export function matches(board: readonly Sushi[]): number[][] {
-  const n = board.length;
-  if (n < 3) return [];
-  const start = board.findIndex((s, i) => s !== board[(i + n - 1) % n]);
-  if (start === -1) return [Array.from({ length: n }, (_, i) => i)];
+export type Level = { id: number; name: string; capacity: number; types: number; target: number; maxOnBelt: number; spawnMs: number; speed: number; path: string };
+// Frozen v2.1 level values; speed and path geometry are presentation settings.
+export const LEVELS: readonly Level[] = data;
+export type Piece = { id: number; kind: Sushi; distance: number };
+export type State = { level: Level; plate: Sushi[]; belt: Piece[]; score: number; status: "playing" | "win" | "lose"; elapsed: number; nextId: number; served: number; recycled: number };
+export function points(length: number, wave = 1): number {
+  return length < 3 ? 0 : 60 * (length - 2) * wave;
+}
+export function matches(plate: readonly Sushi[]): number[][] {
   const groups: number[][] = [];
-  let run: number[] = [];
-  for (let k = 0; k < n; k++) {
-    const i = (start + k) % n;
-    if (run.length && board[i] !== board[run[0]]) {
-      if (run.length >= 3) groups.push(run);
-      run = [];
-    }
-    run.push(i);
+  for (let start = 0; start < plate.length;) {
+    let end = start + 1;
+    while (end < plate.length && plate[end] === plate[start]) end++;
+    if (end - start >= 3) groups.push(Array.from({ length: end - start }, (_, i) => start + i));
+    start = end;
   }
-  if (run.length >= 3) groups.push(run);
   return groups;
 }
-
-export function swap(board: readonly Sushi[], a: number, b: number): Sushi[] {
-  const next = [...board];
-  [next[a], next[b]] = [next[b], next[a]];
-  return next;
-}
-
-export function hasMove(board: readonly Sushi[]): boolean {
-  return board.some(
-    (_, i) => matches(swap(board, i, (i + 1) % board.length)).length > 0,
-  );
-}
-
-export function initialBoard(random: Random = Math.random): Sushi[] {
-  for (let attempt = 0; attempt < 500; attempt++) {
-    const board = Array.from({ length: CONFIG.slots }, () =>
-      randomSushi(random),
-    );
-    if (!matches(board).length && hasMove(board)) return board;
+export function resolve(plate: readonly Sushi[]) {
+  let remaining = [...plate], score = 0;
+  const waves: { before: Sushi[]; removed: number[]; gain: number }[] = [];
+  for (let groups = matches(remaining); groups.length; groups = matches(remaining)) {
+    const removed = groups.flat();
+    const gain = groups.reduce((sum, group) => sum + points(group.length, waves.length + 1), 0);
+    waves.push({ before: remaining, removed, gain });
+    score += gain;
+    remaining = remaining.filter((_, i) => !removed.includes(i));
   }
-  // Bounded fallback also guarantees a playable opening for a constant RNG.
-  return [
-    "salmon",
-    "salmon",
-    "tuna",
-    "salmon",
-    "egg",
-    "shrimp",
-    "roe",
-    "cucumber",
-    "tuna",
-    "egg",
-    "shrimp",
-    "cucumber",
-  ];
+  return { plate: remaining, score, waves };
 }
-
-export function newGame(random: Random = Math.random): State {
-  return {
-    board: initialBoard(random),
-    moves: CONFIG.moves,
-    score: 0,
-    selected: null,
-    busy: false,
-  };
+export function outcome(state: Pick<State, "score" | "plate" | "level">): State["status"] {
+  if (state.score >= state.level.target) return "win";
+  return state.plate.length >= state.level.capacity && !matches(state.plate).length ? "lose" : "playing";
 }
-
-export function outcome(
-  state: Pick<State, "score" | "moves">,
-): "win" | "lose" | null {
-  return state.score >= CONFIG.target
-    ? "win"
-    : state.moves === 0
-      ? "lose"
-      : null;
+export function newGame(level: Level = LEVELS[0]): State {
+  return { level, plate: [], belt: [], score: 0, status: "playing", elapsed: level.spawnMs, nextId: 1, served: 0, recycled: 0 };
 }
-
-export function select(state: State, index: number): [number, number] | null {
-  if (
-    state.busy ||
-    outcome(state) ||
-    !Number.isInteger(index) ||
-    index < 0 ||
-    index >= CONFIG.slots
-  )
-    return null;
-  const previous = state.selected;
-  if (previous === null || !adjacent(previous, index)) {
-    state.selected = previous === index ? null : index;
-    return null;
+export function take(state: State, id: number) {
+  const index = state.belt.findIndex(piece => piece.id === id);
+  if (state.status !== "playing" || state.plate.length >= state.level.capacity || index < 0) return null;
+  const [piece] = state.belt.splice(index, 1);
+  const result = resolve([...state.plate, piece.kind]);
+  state.plate = result.plate;
+  state.score += result.score;
+  state.status = outcome(state);
+  return result;
+}
+export function advance(state: State, seconds: number, pathLength: number) {
+  if (state.status !== "playing" || seconds < 0) return;
+  state.belt.forEach(piece => piece.distance += state.level.speed * seconds);
+  const live = state.belt.filter(piece => piece.distance <= pathLength);
+  state.recycled += state.belt.length - live.length;
+  state.belt = live;
+  state.elapsed += seconds * 1000;
+  // Cycling supply guarantees every allowed type returns; waiting never causes failure.
+  // Spacing protects large touch targets; a blocked outlet waits instead of piling up.
+  if (state.elapsed >= state.level.spawnMs && state.belt.length < state.level.maxOnBelt && state.belt.every(piece => piece.distance >= 82)) {
+    state.belt.push({ id: state.nextId++, kind: TYPES[state.served++ % state.level.types], distance: 0 });
+    state.elapsed = 0;
   }
-  state.selected = null;
-  state.moves--;
-  state.busy = true;
-  return [previous, index];
-}
-
-export function points(length: number, wave: number): number {
-  const base =
-    length < 3
-      ? 0
-      : length === 3
-        ? 30
-        : length === 4
-          ? 50
-          : 80 + (length - 5) * 15;
-  return Math.round(base * Math.min(2, 1 + 0.2 * (wave - 1)));
-}
-
-export type Slide = { sushi: Sushi; from: number; to: number; fresh: boolean };
-export function refill(
-  board: readonly Sushi[],
-  groups: number[][],
-  random: Random = Math.random,
-): { board: Sushi[]; slides: Slide[] } {
-  const removed = new Set(groups.flat());
-  const slides: Slide[] = [];
-  // Indices increase clockwise from the top. Clockwise neighbours slide back
-  // into gaps; new pieces enter across the top seam (12 -> 11 -> ...).
-  board.forEach((sushi, from) => {
-    if (!removed.has(from))
-      slides.push({ sushi, from, to: slides.length, fresh: false });
-  });
-  let incoming = 0;
-  while (slides.length < board.length) {
-    slides.push({
-      sushi: randomSushi(random),
-      from: board.length + incoming++,
-      to: slides.length,
-      fresh: true,
-    });
-  }
-  return { board: slides.map((s) => s.sushi), slides };
 }

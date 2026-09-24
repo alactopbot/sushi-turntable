@@ -1,70 +1,44 @@
 <!doctype html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#faf5e9" />
-    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
-    <meta
-      name="description"
-      content="换相邻的寿司，连成三个就消掉。适合亲子一起玩的转转寿司小游戏。"
-    />
-    <title>转转寿司</title>
-  </head>
-  <body>
-    <main>
-      <header>
-        <span class="eyebrow">小小厨房 · 第一盘</span>
-        <h1>转转寿司</h1>
-        <p>换相邻的寿司，连成三个就消掉。</p>
-      </header>
-      <section class="game" aria-label="转转寿司游戏">
-        <div class="hud">
-          <div class="moves">
-            <span>剩余步数</span><strong id="moves">20</strong>
-          </div>
-          <div class="score">
-            <div>
-              <span>收集美味</span
-              ><span><strong id="score">0</strong> / 300 分</span>
-            </div>
-            <progress
-              id="progress"
-              value="0"
-              max="300"
-              aria-label="目标分进度"
-            ></progress>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#faf5e9" />
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+  <meta name="description" content="从流水线点到盘子里，连成三个就消掉。盘子不能换顺序哦。" />
+  <title>转转寿司</title>
+</head>
+<body>
+  <main>
+    <header>
+      <span class="eyebrow">小小厨房 · 美味开张</span>
+      <h1>转转寿司</h1>
+      <p>从流水线点到盘子里，连成三个就消掉。盘子不能换顺序哦。</p>
+    </header>
+    <section class="game" aria-label="转转寿司游戏">
+      <div class="hud">
+        <div class="level"><span>关卡</span><strong id="level">1</strong></div>
+        <div class="score">
+          <div><span id="level-name">第一份美味</span><span><strong id="score">0</strong> / <span id="target">180</span> 分</span></div>
+          <progress id="progress" value="0" max="180" aria-label="目标分进度"></progress>
+          <div><span id="capacity">8 格 · 3 种寿司</span><button id="retry" class="quiet" type="button">重开本关</button></div>
+        </div>
+      </div>
+      <div class="board">
+        <canvas id="board" aria-label="弯道流水线，点任意寿司放入下方盘尾，盘内不能重排">请使用支持 Canvas 的浏览器。</canvas>
+        <div id="result" class="result" hidden role="dialog" aria-modal="true" aria-labelledby="result-title">
+          <div class="result-card">
+            <h2 id="result-title"></h2><p id="result-copy"></p>
+            <button id="next" type="button">下一关</button>
+            <button id="restart" type="button">再试一次</button>
           </div>
         </div>
-        <div class="board">
-          <canvas id="board" aria-label="十二格环形寿司棋盘，点一格再点相邻格交换"
-            >请使用支持 Canvas 的浏览器。</canvas
-          >
-          <div id="result" class="result" hidden>
-            <div class="result-card">
-              <span id="result-icon" class="result-icon"></span>
-              <h2 id="result-title"></h2>
-              <p id="result-copy"></p>
-              <button id="restart" type="button">
-                再来一盘 <span>↻</span>
-              </button>
-            </div>
-          </div>
-        </div>
-        <p id="hint" class="hint" role="status" aria-live="polite">
-          点一格，再点旁边的一格
-        </p>
-        <div class="instructions">
-          <span><b>1</b> 点选寿司</span><span><b>2</b> 换相邻的</span
-          ><span><b>3</b> 三个就消</span>
-        </div>
-      </section>
-      <footer>
-        一盘 20 步 · 收集 300 分<br /><span
-          >六种寿司，一起找到美味的排列。</span
-        >
-      </footer>
-    </main>
-    <script type="module" src="/src/main.ts"></script>
-  </body>
+      </div>
+      <p id="hint" class="hint" role="status" aria-live="polite">点线上任意寿司，放到盘尾 →</p>
+      <div class="instructions"><span>① 点线取餐</span><span>② 入盘尾</span><span>③ 连三消掉</span></div>
+    </section>
+    <footer>三连 60 分 · 四连 120 分 · 五连 180 分<br />达到目标分过关，盘满且不能消除就结束。</footer>
+  </main>
+  <script type="module" src="/src/main.ts"></script>
+</body>
 </html>
